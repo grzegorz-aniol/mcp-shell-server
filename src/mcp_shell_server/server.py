@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 import signal
 import traceback
@@ -165,9 +166,83 @@ async def call_tool(name: str, arguments: Any) -> Sequence[TextContent]:
         raise RuntimeError(f"Error executing command: {str(e)}") from e
 
 
-async def main() -> None:
+async def _run_stdio(stop_event: asyncio.Event) -> None:
+    from mcp.server.stdio import stdio_server
+
+    async with stdio_server() as (read_stream, write_stream):
+        # Run the server until stop_event is set
+        server_task = asyncio.create_task(
+            app.run(read_stream, write_stream, app.create_initialization_options())
+        )
+
+        # Create task for stop event
+        stop_task = asyncio.create_task(stop_event.wait())
+
+        # Wait for either server completion or stop signal
+        done, pending = await asyncio.wait(
+            [server_task, stop_task], return_when=asyncio.FIRST_COMPLETED
+        )
+
+        # Check for exceptions in completed tasks
+        for task in done:
+            try:
+                await task
+            except Exception:
+                raise  # Re-raise the exception
+
+        # Cancel any pending tasks
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+
+async def _run_streamable_http(stop_event: asyncio.Event) -> None:
+    import uvicorn
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+
+    session_manager = StreamableHTTPSessionManager(app=app)
+
+    async def streamable_endpoint(scope, receive, send):
+        await session_manager.handle_request(scope, receive, send)
+
+    starlette_app = Starlette(
+        routes=[Route("/mcp", endpoint=streamable_endpoint)],
+        lifespan=lambda _app: session_manager.run(),
+    )
+
+    config = uvicorn.Config(
+        app=starlette_app,
+        host="0.0.0.0",
+        port=8000,
+        log_level="info",
+    )
+    http_server = uvicorn.Server(config)
+
+    server_task = asyncio.create_task(http_server.serve())
+    stop_task = asyncio.create_task(stop_event.wait())
+
+    done, pending = await asyncio.wait(
+        [server_task, stop_task], return_when=asyncio.FIRST_COMPLETED
+    )
+
+    if stop_task in done:
+        http_server.should_exit = True
+        await server_task
+
+    for task in pending:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+async def main(transport: str = "stdio") -> None:
     """Main entry point for the MCP shell server"""
-    logger.info(f"Starting MCP shell server v{__version__}")
+    logger.info(f"Starting MCP shell server v{__version__} (transport={transport})")
 
     # Setup signal handling
     loop = asyncio.get_running_loop()
@@ -183,36 +258,14 @@ async def main() -> None:
         loop.add_signal_handler(sig, handle_signal)
 
     try:
-        from mcp.server.stdio import stdio_server
-
-        async with stdio_server() as (read_stream, write_stream):
-            # Run the server until stop_event is set
-            server_task = asyncio.create_task(
-                app.run(read_stream, write_stream, app.create_initialization_options())
+        if transport == "stdio":
+            await _run_stdio(stop_event)
+        elif transport == "streamableHttp":
+            await _run_streamable_http(stop_event)
+        else:
+            raise ValueError(
+                f"Unknown transport: {transport}. Use: stdio or streamableHttp."
             )
-
-            # Create task for stop event
-            stop_task = asyncio.create_task(stop_event.wait())
-
-            # Wait for either server completion or stop signal
-            done, pending = await asyncio.wait(
-                [server_task, stop_task], return_when=asyncio.FIRST_COMPLETED
-            )
-
-            # Check for exceptions in completed tasks
-            for task in done:
-                try:
-                    await task
-                except Exception:
-                    raise  # Re-raise the exception
-
-            # Cancel any pending tasks
-            for task in pending:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
 
     except Exception as e:
         logger.error(f"Server error: {str(e)}")

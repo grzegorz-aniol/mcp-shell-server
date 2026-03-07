@@ -203,7 +203,7 @@ async def _run_streamable_http(stop_event: asyncio.Event) -> None:
     import uvicorn
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
     from starlette.applications import Starlette
-    from starlette.routing import Route
+    from starlette.routing import Mount
 
     session_manager = StreamableHTTPSessionManager(app=app)
 
@@ -211,7 +211,7 @@ async def _run_streamable_http(stop_event: asyncio.Event) -> None:
         await session_manager.handle_request(scope, receive, send)
 
     starlette_app = Starlette(
-        routes=[Route("/mcp", endpoint=streamable_endpoint)],
+        routes=[Mount("/mcp", app=streamable_endpoint)],
         lifespan=lambda _app: session_manager.run(),
     )
 

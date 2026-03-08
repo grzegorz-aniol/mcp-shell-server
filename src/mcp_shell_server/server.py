@@ -136,6 +136,9 @@ class ExecuteToolHandler:
         except asyncio.TimeoutError as e:
             raise ValueError(f"Command timed out after {timeout} seconds") from e
 
+        if not content:
+            return [TextContent(type="text", text="")]
+
         return content
 
 

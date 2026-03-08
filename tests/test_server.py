@@ -277,7 +277,9 @@ async def test_call_tool_completes_within_timeout(monkeypatch):
     """Test command that completes within timeout period"""
     monkeypatch.setenv("ALLOW_COMMANDS", "sleep")
     result = await call_tool("shell_execute", {"command": ["sleep", "1"], "timeout": 2})
-    assert len(result) == 0  # sleep command produces no output
+    assert len(result) == 1
+    assert result[0].type == "text"
+    assert result[0].text == ""
 
 
 @pytest.mark.asyncio
@@ -361,7 +363,9 @@ async def test_call_tool_filters_known_shell_warnings(monkeypatch):
     monkeypatch.setenv("ALLOW_COMMANDS", "echo")
 
     result = await call_tool("shell_execute", {"command": ["echo", "hello"]})
-    assert len(result) == 0
+    assert len(result) == 1
+    assert result[0].type == "text"
+    assert result[0].text == ""
 
 
 @pytest.mark.asyncio

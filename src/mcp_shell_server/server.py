@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import json
 import logging
 import signal
 import traceback
@@ -22,6 +23,7 @@ IGNORED_STDERR_SUBSTRINGS = (
     "cannot set terminal process group",
     "no job control in this shell",
 )
+DEFAULT_SUBPROCESS_TIMEOUT_SECONDS = 30
 
 
 class ExecuteToolHandler:
@@ -83,7 +85,11 @@ class ExecuteToolHandler:
         command = arguments.get("command", [])
         stdin = arguments.get("stdin")
         directory = arguments.get("directory", "/tmp")  # default to /tmp for safety
-        timeout = arguments.get("timeout")
+        timeout = arguments.get("timeout", DEFAULT_SUBPROCESS_TIMEOUT_SECONDS)
+
+        logger.info(
+            "command arguments json: %s", json.dumps(arguments, ensure_ascii=True)
+        )
 
         if not command:
             raise ValueError("No command provided")
@@ -104,14 +110,16 @@ class ExecuteToolHandler:
 
                 result = await asyncio.wait_for(
                     self.executor.execute(
-                        command, directory, stdin, None
-                    ),  # Pass None for timeout
+                        command, directory, stdin, timeout
+                    ),
                     timeout=actual_timeout,
                 )
             except asyncio.TimeoutError as e:
                 raise ValueError("Command execution timed out") from e
 
             if result.get("error"):
+                if "timed out" in str(result["error"]).lower():
+                    raise ValueError("Command execution timed out")
                 raise ValueError(result["error"])
 
             # Add stdout if present

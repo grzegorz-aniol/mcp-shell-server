@@ -7,6 +7,8 @@ import signal
 from typing import IO, Any, Dict, List, Optional, Set, Tuple, Union
 from weakref import WeakSet
 
+DEFAULT_SUBPROCESS_TIMEOUT_SECONDS = 30
+
 
 class ProcessManager:
     """Manages process creation, execution, and cleanup for shell commands."""
@@ -157,6 +159,7 @@ class ProcessManager:
             ValueError: If process creation fails
         """
         try:
+            logging.info("spawn command line: %s", shell_cmd)
             process = await asyncio.create_subprocess_shell(
                 shell_cmd,
                 stdin=asyncio.subprocess.PIPE,
@@ -197,6 +200,9 @@ class ProcessManager:
             asyncio.TimeoutError: If execution times out
         """
         stdin_bytes = stdin.encode() if stdin else None
+        effective_timeout = (
+            DEFAULT_SUBPROCESS_TIMEOUT_SECONDS if timeout is None else timeout
+        )
 
         async def _kill_process():
             if process.returncode is not None:
@@ -218,18 +224,28 @@ class ProcessManager:
                 logging.warning(f"Error killing process: {e}")
 
         try:
-            if timeout:
+            if effective_timeout:
                 try:
                     return await asyncio.wait_for(
-                        process.communicate(input=stdin_bytes), timeout=timeout
+                        process.communicate(input=stdin_bytes), timeout=effective_timeout
                     )
                 except asyncio.TimeoutError:
+                    logging.warning(
+                        "subprocess timeout after %s seconds (pid=%s)",
+                        effective_timeout,
+                        process.pid,
+                    )
                     await _kill_process()
                     raise
             return await process.communicate(input=stdin_bytes)
         except Exception as e:
             await _kill_process()
             raise e
+        finally:
+            logging.info(
+                "subprocess exit code: %s",
+                process.returncode if process.returncode is not None else -1,
+            )
 
     async def execute_pipeline(
         self,

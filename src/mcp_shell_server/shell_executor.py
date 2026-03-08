@@ -378,7 +378,10 @@ class ShellExecutor:
             try:
                 stdout, stderr, returncode = (
                     await self.process_manager.execute_pipeline(
-                        [command[0] for command in parsed_commands],
+                        [
+                            self.preprocessor.create_shell_command(command)
+                            for command in parsed_commands
+                        ],
                         first_stdin=first_stdin,
                         last_stdout=pipeline_stdout,
                         directory=directory,

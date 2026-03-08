@@ -15,7 +15,9 @@ class CommandPreProcessor:
         for token in command:
             if token in ["||", "&&", ";"]:  # Special shell operators
                 preprocessed_command.append(token)
-            elif "|" in token and token != "|":
+            elif "|" in token and token != "|" and not any(
+                char.isspace() for char in token
+            ):
                 parts = token.split("|")
                 preprocessed_command.extend(
                     [part.strip() for part in parts if part.strip()]

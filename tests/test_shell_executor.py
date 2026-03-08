@@ -700,6 +700,15 @@ def test_preprocess_command(shell_executor_with_mock):
         "test",
     ]
 
+    # Pipes inside a single script argument (e.g. sh -c "...|...") must stay untouched
+    assert shell_executor_with_mock.preprocessor.preprocess_command(
+        ["sh", "-c", "echo one | sed 's/one/two/'"]
+    ) == [
+        "sh",
+        "-c",
+        "echo one | sed 's/one/two/'",
+    ]
+
     # Test command with special operators
     assert shell_executor_with_mock.preprocessor.preprocess_command(
         ["echo", "hello", "&&", "ls"]
